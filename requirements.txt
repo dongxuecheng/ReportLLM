@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+openai
+httpx
+PyYAML
+Jinja2
+loguru
+python-dotenv

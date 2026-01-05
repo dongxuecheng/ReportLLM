@@ -1,0 +1,62 @@
+services:
+  # vLLM 推理服务（GPU）
+  vllm-service:
+    image: vllm/vllm-openai:nightly
+    container_name: vllm-service
+    ports:
+      - "8001:8000"  # 宿主机 8001 -> 容器 8000（便于调试）
+    volumes:
+      - ${MODEL_PATH}:/model  # 挂载模型目录
+    environment:
+      - CUDA_VISIBLE_DEVICES=0  # 使用第一块 GPU
+    command: >
+      --model ${VLLM_MODEL_NAME}
+      --max-model-len 8192
+      --gpu-memory-utilization 0.5
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s  # 模型加载需要较长时间
+    restart: unless-stopped
+    networks:
+      - report-network
+
+  # API 服务（CPU/IO）
+  api-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-service
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./config:/app/config:ro  # 挂载配置文件（只读）
+      - ./logs:/app/logs  # 持久化日志
+      - ./.env:/app/.env:ro  # 环境变量
+    environment:
+      - VLLM_API_URL=http://vllm-service:8000/v1
+    depends_on:
+      vllm-service:
+        condition: service_healthy  # 等待 vLLM 健康后再启动
+    restart: unless-stopped
+    networks:
+      - report-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  report-network:
+    driver: bridge
