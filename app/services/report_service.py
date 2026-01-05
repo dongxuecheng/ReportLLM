@@ -35,9 +35,14 @@ class ReportService:
         self.http_client = http_client
         self.template_path = Path("config/templates.yaml")
 
-    def _load_prompt_template(self) -> Dict[str, str]:
+    def _load_prompt_template(
+        self, template_type: str = "template_a"
+    ) -> Dict[str, str]:
         """
         加载 YAML 中的 Prompt 模板
+
+        Args:
+            template_type: 模板类型，可选 template_a 或 template_b
 
         Returns:
             包含 system_prompt 和 user_prompt 的字典
@@ -45,22 +50,28 @@ class ReportService:
         try:
             with open(self.template_path, "r", encoding="utf-8") as f:
                 templates = yaml.safe_load(f)
-            return templates["report_generation"]
+            if template_type not in templates:
+                logger.error(f"模板类型 {template_type} 不存在，回退到 template_a")
+                template_type = "template_a"
+            return templates[template_type]
         except Exception as e:
             logger.error(f"加载 Prompt 模板失败: {e}")
             raise
 
-    def _render_prompt(self, scores: Dict[str, float]) -> tuple[str, str]:
+    def _render_prompt(
+        self, scores: Dict[str, float], template_type: str = "template_a"
+    ) -> tuple[str, str]:
         """
         使用 Jinja2 渲染 Prompt
 
         Args:
             scores: 多维度分数字典
+            template_type: 模板类型
 
         Returns:
             (system_prompt, user_prompt) 元组
         """
-        template_data = self._load_prompt_template()
+        template_data = self._load_prompt_template(template_type)
 
         # 渲染 system prompt（通常不需要变量）
         system_prompt = template_data["system_prompt"].strip()
@@ -75,6 +86,7 @@ class ReportService:
         self,
         scores: Dict[str, float],
         trace_id: str,
+        template_type: str = "template_a",
     ) -> str:
         """
         调用 vLLM 生成报告
@@ -82,14 +94,15 @@ class ReportService:
         Args:
             scores: 多维度分数字典
             trace_id: 追踪 ID
+            template_type: 模板类型
 
         Returns:
             生成的报告文本
         """
         logger.bind(trace_id=trace_id).info(
-            f"开始渲染 Prompt，分数维度: {list(scores.keys())}"
+            f"开始渲染 Prompt，分数维度: {list(scores.keys())}，模板类型: {template_type}"
         )
-        system_prompt, user_prompt = self._render_prompt(scores)
+        system_prompt, user_prompt = self._render_prompt(scores, template_type)
 
         logger.bind(trace_id=trace_id).info(
             f"调用 vLLM 生成报告，模型: {settings.vllm_model_name}, "
@@ -173,6 +186,7 @@ class ReportService:
         scores: Dict[str, float],
         student_id: str,
         trace_id: str,
+        template_type: str = "template_a",
     ) -> None:
         """
         完整的报告生成和回调流程（异步后台任务）
@@ -181,14 +195,18 @@ class ReportService:
             scores: 多维度分数字典
             student_id: 学员 ID
             trace_id: 追踪 ID
+            template_type: 模板类型
         """
         logger.bind(trace_id=trace_id).info(
-            f"开始处理报告生成任务，学员 ID: {student_id}, " f"分数维度: {len(scores)}"
+            f"开始处理报告生成任务，学员 ID: {student_id}, "
+            f"分数维度: {len(scores)}，模板类型: {template_type}"
         )
 
         try:
             # 步骤 1: 调用 vLLM 生成报告
-            report = await self._generate_report_from_vllm(scores, trace_id)
+            report = await self._generate_report_from_vllm(
+                scores, trace_id, template_type
+            )
 
             # 步骤 2: 回调后端 B（成功状态）
             callback_data = BackendBCallback(

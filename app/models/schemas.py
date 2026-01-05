@@ -3,7 +3,7 @@
 使用 Pydantic v2 进行请求/响应验证
 """
 
-from typing import Dict
+from typing import Dict, Literal
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +20,11 @@ class ReportRequest(BaseModel):
         description="学员唯一标识符",
         examples=["STU20260105001"],
     )
+    template_type: Literal["template_a", "template_b"] = Field(
+        default="template_a",
+        description="模板类型：template_a(通用项目评估) 或 template_b(技能专项评估)",
+        examples=["template_a"],
+    )
 
     class Config:
         json_schema_extra = {
@@ -31,6 +36,7 @@ class ReportRequest(BaseModel):
                     "collaboration": 92.0,
                 },
                 "student_id": "STU20260105001",
+                "template_type": "template_a",
             }
         }
 

@@ -56,7 +56,8 @@ async def generate_report(
     logger.bind(trace_id=trace_id).info(
         f"收到报告生成请求，学员 ID: {request.student_id}, "
         f"分数维度: {list(request.scores.keys())}, "
-        f"分数值: {request.scores}"
+        f"分数值: {request.scores}, "
+        f"模板类型: {request.template_type}"
     )
 
     # 创建服务实例
@@ -71,6 +72,7 @@ async def generate_report(
         scores=request.scores,
         student_id=request.student_id,
         trace_id=trace_id,
+        template_type=request.template_type,
     )
 
     logger.bind(trace_id=trace_id).info("报告生成任务已加入后台队列")
