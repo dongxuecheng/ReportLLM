@@ -3,40 +3,80 @@
 使用 Pydantic v2 进行请求/响应验证
 """
 
-from typing import Dict, Literal
-from pydantic import BaseModel, Field
+from typing import Dict
+from pydantic import BaseModel, Field, model_validator
 
 
-class ReportRequest(BaseModel):
-    """前端 A 的报告生成请求"""
+class ReportRequestA(BaseModel):
+    """模板 A：项目评估请求"""
 
-    scores: Dict[str, float] = Field(
-        description="多维度分数字典，如 {'creativity': 85.0, 'completeness': 90.0}",
-        examples=[{"creativity": 85.0, "completeness": 90.0, "accuracy": 88.5}],
-    )
     student_id: str = Field(
         min_length=1,
         max_length=100,
         description="学员唯一标识符",
         examples=["STU20260105001"],
     )
-    template_type: Literal["template_a", "template_b"] = Field(
-        default="template_a",
-        description="模板类型：template_a(通用项目评估) 或 template_b(技能专项评估)",
-        examples=["template_a"],
+    scores: Dict[str, float] = Field(
+        description="多维度分数字典，如 {'creativity': 85.0, 'completeness': 90.0}",
+        examples=[{"creativity": 85.0, "completeness": 90.0, "accuracy": 88.5}],
     )
 
     class Config:
         json_schema_extra = {
             "example": {
+                "student_id": "STU20260105001",
                 "scores": {
                     "creativity": 85.0,
                     "completeness": 90.0,
                     "accuracy": 88.5,
                     "collaboration": 92.0,
                 },
+            }
+        }
+
+
+class QuestionStat(BaseModel):
+    """题目统计信息"""
+
+    total: int = Field(ge=0, description="该题型的总题数")
+    correct: int = Field(ge=0, description="答对的题数")
+
+    @model_validator(mode="after")
+    def validate_correct_not_exceed_total(self):
+        """验证答对数不超过总题数"""
+        if self.correct > self.total:
+            raise ValueError(f"答对数({self.correct})不能超过总题数({self.total})")
+        return self
+
+
+class ReportRequestB(BaseModel):
+    """模板 B：题目统计请求"""
+
+    student_id: str = Field(
+        min_length=1,
+        max_length=100,
+        description="学员唯一标识符",
+        examples=["STU20260105001"],
+    )
+    question_stats: Dict[str, QuestionStat] = Field(
+        description="题目类型统计字典，key为题型名称，value为统计信息",
+        examples=[
+            {
+                "选择题": {"total": 10, "correct": 8},
+                "判断题": {"total": 5, "correct": 4},
+            }
+        ],
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
                 "student_id": "STU20260105001",
-                "template_type": "template_a",
+                "question_stats": {
+                    "选择题": {"total": 10, "correct": 8},
+                    "判断题": {"total": 5, "correct": 4},
+                    "简答题": {"total": 3, "correct": 2},
+                },
             }
         }
 

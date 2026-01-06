@@ -4,7 +4,7 @@
 """
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import httpx
 import yaml
@@ -13,7 +13,7 @@ from loguru import logger
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-from app.models.schemas import BackendBCallback
+from app.models.schemas import BackendBCallback, QuestionStat
 
 
 class ReportService:
@@ -59,14 +59,18 @@ class ReportService:
             raise
 
     def _render_prompt(
-        self, scores: Dict[str, float], template_type: str = "template_a"
+        self,
+        template_type: str = "template_a",
+        scores: Optional[Dict[str, float]] = None,
+        question_stats: Optional[Dict[str, QuestionStat]] = None,
     ) -> tuple[str, str]:
         """
         使用 Jinja2 渲染 Prompt
 
         Args:
-            scores: 多维度分数字典
             template_type: 模板类型
+            scores: 多维度分数字典（template_a 使用）
+            question_stats: 题目统计字典（template_b 使用）
 
         Returns:
             (system_prompt, user_prompt) 元组
@@ -76,33 +80,58 @@ class ReportService:
         # 渲染 system prompt（通常不需要变量）
         system_prompt = template_data["system_prompt"].strip()
 
-        # 渲染 user prompt（传入 scores）
+        # 渲染 user prompt
         user_template = Template(template_data["user_prompt"])
-        user_prompt = user_template.render(scores=scores).strip()
+
+        if template_type == "template_a":
+            user_prompt = user_template.render(scores=scores).strip()
+        else:  # template_b
+            # 计算正确率并构造渲染数据
+            stats_with_rate = {}
+            for q_type, stat in question_stats.items():
+                stats_with_rate[q_type] = {
+                    "total": stat.total,
+                    "correct": stat.correct,
+                    "rate": (
+                        round(stat.correct / stat.total * 100, 1)
+                        if stat.total > 0
+                        else 0
+                    ),
+                }
+            user_prompt = user_template.render(question_stats=stats_with_rate).strip()
 
         return system_prompt, user_prompt
 
     async def _generate_report_from_vllm(
         self,
-        scores: Dict[str, float],
         trace_id: str,
         template_type: str = "template_a",
+        scores: Optional[Dict[str, float]] = None,
+        question_stats: Optional[Dict[str, QuestionStat]] = None,
     ) -> str:
         """
         调用 vLLM 生成报告
 
         Args:
-            scores: 多维度分数字典
             trace_id: 追踪 ID
             template_type: 模板类型
+            scores: 多维度分数字典（template_a 使用）
+            question_stats: 题目统计字典（template_b 使用）
 
         Returns:
             生成的报告文本
         """
+        if template_type == "template_a":
+            data_info = f"分数维度: {list(scores.keys())}"
+        else:
+            data_info = f"题目类型: {list(question_stats.keys())}"
+
         logger.bind(trace_id=trace_id).info(
-            f"开始渲染 Prompt，分数维度: {list(scores.keys())}，模板类型: {template_type}"
+            f"开始渲染 Prompt，{data_info}，模板类型: {template_type}"
         )
-        system_prompt, user_prompt = self._render_prompt(scores, template_type)
+        system_prompt, user_prompt = self._render_prompt(
+            template_type=template_type, scores=scores, question_stats=question_stats
+        )
 
         logger.bind(trace_id=trace_id).info(
             f"调用 vLLM 生成报告，模型: {settings.vllm_model_name}, "
@@ -183,27 +212,40 @@ class ReportService:
 
     async def generate_and_callback(
         self,
-        scores: Dict[str, float],
         student_id: str,
         trace_id: str,
         template_type: str = "template_a",
+        scores: Optional[Dict[str, float]] = None,
+        question_stats: Optional[Dict[str, QuestionStat]] = None,
     ) -> None:
         """
         完整的报告生成和回调流程（异步后台任务）
 
         Args:
-            scores: 多维度分数字典
             student_id: 学员 ID
             trace_id: 追踪 ID
             template_type: 模板类型
+            scores: 多维度分数字典（template_a 使用）
+            question_stats: 题目统计字典（template_b 使用）
         """
+        if template_type == "template_a":
+            data_count = len(scores) if scores else 0
+        else:
+            data_count = len(question_stats) if question_stats else 0
+
         logger.bind(trace_id=trace_id).info(
             f"开始处理报告生成任务，学员 ID: {student_id}, "
-            f"分数维度: {len(scores)}，模板类型: {template_type}"
+            f"数据项数: {data_count}，模板类型: {template_type}"
         )
 
         try:
             # 步骤 1: 调用 vLLM 生成报告
+            report = await self._generate_report_from_vllm(
+                trace_id=trace_id,
+                template_type=template_type,
+                scores=scores,
+                question_stats=question_stats,
+            )
             report = await self._generate_report_from_vllm(
                 scores, trace_id, template_type
             )
